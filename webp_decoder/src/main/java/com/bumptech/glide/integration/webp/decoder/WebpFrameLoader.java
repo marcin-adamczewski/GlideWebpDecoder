@@ -6,6 +6,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.os.SystemClock;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -18,6 +19,7 @@ import com.bumptech.glide.load.Option;
 import com.bumptech.glide.load.Transformation;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
 import com.bumptech.glide.load.engine.bitmap_recycle.BitmapPool;
+import com.bumptech.glide.request.FutureTarget;
 import com.bumptech.glide.request.RequestOptions;
 import com.bumptech.glide.request.target.CustomTarget;
 import com.bumptech.glide.request.transition.Transition;
@@ -29,6 +31,7 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 
 
 /**
@@ -49,12 +52,12 @@ public class WebpFrameLoader {
     private boolean isLoadPending;
     private boolean startFromFirstFrame;
     public RequestBuilder<Bitmap> requestBuilder;
-    private DelayTarget current;
+    private FrameTarget current;
     private boolean isCleared;
-    private DelayTarget next;
+    private FrameTarget next;
     private Bitmap firstFrame;
     private Transformation<Bitmap> transformation;
-    private DelayTarget pendingTarget;
+    private FrameTarget pendingTarget;
     @Nullable
     private WebpFrameLoader.OnEveryFrameListener onEveryFrameListener;
     private int firstFrameSize;
@@ -218,7 +221,7 @@ public class WebpFrameLoader {
         }
 
         if (pendingTarget != null) {
-            DelayTarget temp = pendingTarget;
+            FrameTarget temp = pendingTarget;
             pendingTarget = null;
             onFrameReady(temp);
             return;
@@ -235,10 +238,17 @@ public class WebpFrameLoader {
         int frameIndex = webpDecoder.getCurrentFrameIndex();
         next = new DelayTarget(handler, frameIndex, targetTime);
 
-        WebpFrameCacheStrategy cacheStrategy = webpDecoder.getCacheStrategy();
-        RequestOptions options = RequestOptions.signatureOf(getFrameSignature(frameIndex))
-                .skipMemoryCache(cacheStrategy.noCache());
-        requestBuilder.apply(options).load(webpDecoder).into(next);
+        loadIntoTarget(next);
+    }
+
+    private RequestOptions getRequestOptions(int frameIndex) {
+        return RequestOptions.signatureOf(getFrameSignature(frameIndex))
+                .skipMemoryCache(webpDecoder.getCacheStrategy().noCache());
+    }
+
+    private void loadIntoTarget(FrameTarget target) {
+        RequestOptions requestOptions = getRequestOptions(target.index);
+        requestBuilder.apply(requestOptions).load(webpDecoder).into(target);
     }
 
     private void recycleFirstFrame() {
@@ -262,7 +272,7 @@ public class WebpFrameLoader {
         this.onEveryFrameListener = onEveryFrameListener;
     }
 
-    void onFrameReady(DelayTarget delayTarget) {
+    void onFrameReady(FrameTarget delayTarget) {
         if (onEveryFrameListener != null) {
             onEveryFrameListener.onFrameReady();
         }
@@ -286,20 +296,23 @@ public class WebpFrameLoader {
 
         if (delayTarget.getResource() != null) {
             recycleFirstFrame();
-            DelayTarget previous = current;
+            FrameTarget previous = current;
             current = delayTarget;
             // The callbacks may unregister when onFrameReady is called, so iterate in reverse to avoid
             // concurrent modifications.
-            for (int i = callbacks.size() - 1; i >= 0; i--) {
-                FrameCallback cb = callbacks.get(i);
-                cb.onFrameReady();
-            }
+            notifyCallbacks();
             if (previous != null) {
                 handler.obtainMessage(FrameLoaderCallback.MSG_CLEAR, previous).sendToTarget();
             }
         }
 
         loadNextFrame();
+    }
+
+    private void notifyCallbacks() {
+        for (int i = callbacks.size() - 1; i >= 0; i--) {
+            callbacks.get(i).onFrameReady();
+        }
     }
 
     private class FrameLoaderCallback implements Handler.Callback {
@@ -310,45 +323,56 @@ public class WebpFrameLoader {
         }
 
         public boolean handleMessage(Message msg) {
-            DelayTarget target;
             if (msg.what == MSG_DELAY) {
-                target = (DelayTarget) msg.obj;
+                DelayTarget target = (DelayTarget) msg.obj;
                 WebpFrameLoader.this.onFrameReady(target);
                 return true;
             } else if (msg.what == MSG_CLEAR) {
-                target = (DelayTarget) msg.obj;
+                FrameTarget target = (FrameTarget) msg.obj;
                 WebpFrameLoader.this.requestManager.clear(target);
             }
             return false;
         }
     }
 
-
-    static class DelayTarget extends CustomTarget<Bitmap> {
-        private final Handler handler;
+    static class FrameTarget extends CustomTarget<Bitmap> {
         final int index;
-        private final long targetTime;
         private Bitmap resource;
 
-        DelayTarget(Handler handler, int index, long targetTime) {
-            this.handler = handler;
+        FrameTarget(int index) {
             this.index = index;
-            this.targetTime = targetTime;
         }
 
         Bitmap getResource() {
             return this.resource;
         }
 
+        @Override
         public void onResourceReady(Bitmap resource, Transition<? super Bitmap> transition) {
             this.resource = resource;
-            Message msg = handler.obtainMessage(FrameLoaderCallback.MSG_DELAY, this);
-            handler.sendMessageAtTime(msg, targetTime);
         }
 
         @Override
         public void onLoadCleared(@Nullable Drawable placeholder) {
             this.resource = null;
+        }
+    }
+
+    static class DelayTarget extends FrameTarget {
+        private final Handler handler;
+        private final long targetTime;
+
+        DelayTarget(Handler handler, int index, long targetTime) {
+            super(index);
+            this.handler = handler;
+            this.targetTime = targetTime;
+        }
+
+        @Override
+        public void onResourceReady(Bitmap resource, Transition<? super Bitmap> transition) {
+            super.onResourceReady(resource, transition);
+            Message msg = handler.obtainMessage(FrameLoaderCallback.MSG_DELAY, this);
+            handler.sendMessageAtTime(msg, targetTime);
         }
     }
 
@@ -406,9 +430,57 @@ public class WebpFrameLoader {
     }
 
     // FORK CHANGES
-    WebpSeekableFrameLoader createSeekableFrameLoader() {
-        return new WebpSeekableFrameLoader(bitmapPool, webpDecoder.copy(), requestBuilder, width, height);
+
+    /**
+     * Blocking load of frame at given index. Can't be called on the main thread.
+     */
+    public void loadFrameBlocking(int index) {
+        if (current != null && current.index == index) {
+            return;
+        }
+
+        stop();
+        seekTo(index);
+        int frameIndex = webpDecoder.getCurrentFrameIndex();
+
+        try {
+            FutureTarget<Bitmap> submit = loadBlocking(frameIndex);
+            FrameTarget previous = current;
+            current = new FrameTarget(frameIndex);
+            current.onResourceReady(submit.get(), null);
+            notifyCallbacks();
+            if (previous != null) {
+                handler.obtainMessage(FrameLoaderCallback.MSG_CLEAR, previous).sendToTarget();
+            }
+        } catch (ExecutionException | InterruptedException e) {
+            Log.e("WebpFrameLoader", "Error when fetching bitmap. " + e.toString());
+        }
     }
+
+    public void loadFrameAt(int index) {
+        stop();
+        seekTo(index);
+        int frameIndex = webpDecoder.getCurrentFrameIndex();
+        next = new DelayTarget(handler, frameIndex, 0);
+        loadIntoTarget(next);
+    }
+
+    private FutureTarget<Bitmap> loadBlocking(int frameIndex) {
+        return requestBuilder.apply(getRequestOptions(frameIndex)).load(webpDecoder).submit();
+    }
+
+    public int getDurationMs() {
+        return webpDecoder.getDurationMs();
+    }
+
+    public int getFrameIndexForTime(long frameStartTimeMs) {
+        return webpDecoder.getFrameIndexForTime(frameStartTimeMs);
+    }
+
+    private void seekTo(int frameIndex) {
+        webpDecoder.seekTo(frameIndex);
+    }
+
     // END OF FORK CHANGES
 
 }

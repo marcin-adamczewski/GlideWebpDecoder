@@ -4,6 +4,12 @@
                 android:orientation="vertical"
                 android:background="#ffffff">
 
+    <Button
+        android:id="@+id/main_go_to_seek"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Seek activity"/>
+
     <TextView
         android:id="@+id/webp_image_type"
         android:layout_width="match_parent"

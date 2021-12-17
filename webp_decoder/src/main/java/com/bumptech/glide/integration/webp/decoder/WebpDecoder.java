@@ -427,10 +427,6 @@ public class WebpDecoder implements GifDecoder {
     }
 
     // FORK CHANGES
-    public WebpDecoder copy() {
-        return new WebpDecoder(mBitmapProvider, mWebPImage, rawData, sampleSize, getCacheStrategy());
-    }
-
     public int getDurationMs() {
         return mWebPImage.getDuration();
     }
@@ -445,6 +441,10 @@ public class WebpDecoder implements GifDecoder {
         }
 
         return -1;
+    }
+
+    public void seekTo(int index) {
+        mFramePointer = index % mWebPImage.getFrameCount();
     }
     // END OF FORK CHANGES
 
