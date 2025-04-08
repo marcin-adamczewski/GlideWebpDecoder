@@ -1,4 +1,5 @@
 apply plugin: 'com.android.library'
+apply plugin: 'maven-publish'
 
 dependencies {
     compileOnly "androidx.annotation:annotation:${ANDROIDX_VERSION}"
@@ -48,5 +49,15 @@ android {
 
     lintOptions {
         abortOnError false
+    }
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            groupId = GROUP
+            artifactId = 'webpdecoder'
+
+        }
     }
 }
