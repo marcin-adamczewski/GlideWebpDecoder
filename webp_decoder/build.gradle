@@ -49,5 +49,3 @@ android {
         abortOnError false
     }
 }
-
-apply from: "${rootProject.projectDir}/release-bintray.gradle"

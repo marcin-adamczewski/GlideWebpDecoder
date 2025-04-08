@@ -8,8 +8,12 @@ buildscript {
     dependencies {
         classpath "com.android.tools.build:gradle:${ANDROID_GRADLE_VERSION}"
         classpath "org.kt3k.gradle.plugin:coveralls-gradle-plugin:${COVERALLS_GRADLE_VERSION}"
+<<<<<<< HEAD
         classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.7.1'
         classpath 'com.github.dcendents:android-maven-gradle-plugin:2.1'
+=======
+        classpath 'com.github.dcendents:android-maven-gradle-plugin:1.4.1'
+>>>>>>> f057642 (Make project buildable)
     }
 }
 
@@ -69,10 +73,17 @@ subprojects { project ->
     }
 }
 
+<<<<<<< HEAD
 //task wrapper(type: Wrapper) {
 //    gradleVersion = '5.4'
 //    distributionType = Wrapper.DistributionType.ALL
 //}
+=======
+wrapper {
+    gradleVersion = '8.9'
+    distributionType = Wrapper.DistributionType.ALL
+}
+>>>>>>> f057642 (Make project buildable)
 
 ext {
     GLIDE_MAJOR_VERSION = GLIDE_VERSION.split("\\.")[0] as String
