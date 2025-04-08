@@ -14,7 +14,6 @@ import android.view.Gravity;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.VisibleForTesting;
 import androidx.vectordrawable.graphics.drawable.Animatable2Compat;
 
 import com.bumptech.glide.Glide;
@@ -84,30 +83,57 @@ public class WebpDrawable extends Drawable implements WebpFrameLoader.FrameCallb
      */
     private List<AnimationCallback> animationCallbacks;
 
+    private static class InitialState {
+        Context context; WebpDecoder webDecoder; BitmapPool bitmapPool;
+        Transformation<Bitmap> frameTransformation; int targetFrameWidth; int targetFrameHeight;
+        Bitmap firstFrame;
+        public InitialState(Context context, WebpDecoder webDecoder, BitmapPool bitmapPool,
+                            Transformation<Bitmap> frameTransformation, int targetFrameWidth, int targetFrameHeight,
+                            Bitmap firstFrame) {
+            this.context = context;
+            this.webDecoder = webDecoder;
+            this.bitmapPool = bitmapPool;
+            this.frameTransformation = frameTransformation;
+            this.targetFrameWidth = targetFrameWidth;
+            this.targetFrameHeight = targetFrameHeight;
+            this.firstFrame = firstFrame.copy(firstFrame.getConfig(), false);
+        }
+
+        WebpDrawable getDrawable() {
+            return new WebpDrawable(
+                    context,
+                    webDecoder,
+                    bitmapPool,
+                    frameTransformation,
+                    targetFrameWidth,
+                    targetFrameHeight,
+                    firstFrame
+            );
+        }
+    }
+
     public WebpDrawable(Context context, WebpDecoder webDecoder, BitmapPool bitmapPool,
            Transformation<Bitmap> frameTransformation, int targetFrameWidth, int targetFrameHeight,
                         Bitmap firstFrame) {
         this(
-            new WebpState(bitmapPool,
-                new WebpFrameLoader(
-                        Glide.get(context),
-                        webDecoder,
-                        targetFrameWidth,
-                        targetFrameHeight,
-                        frameTransformation,
-                        firstFrame)));
+                new WebpState(bitmapPool,
+                        new WebpFrameLoader(
+                                Glide.get(context),
+                                webDecoder,
+                                targetFrameWidth,
+                                targetFrameHeight,
+                                frameTransformation,
+                                firstFrame),
+                        new InitialState(context, webDecoder, bitmapPool, frameTransformation,
+                                targetFrameWidth, targetFrameHeight, firstFrame)
+                )
+        );
     }
 
     WebpDrawable(WebpState state) {
         this.isVisible = true;
         this.state = Preconditions.checkNotNull(state);
         setLoopCount(LOOP_INTRINSIC);
-    }
-
-    @VisibleForTesting
-    WebpDrawable(WebpFrameLoader frameLoader, BitmapPool bitmapPool, Paint paint) {
-        this(new WebpState(bitmapPool, frameLoader));
-        this.paint = paint;
     }
 
     public int getSize() {
@@ -301,6 +327,7 @@ public class WebpDrawable extends Drawable implements WebpFrameLoader.FrameCallb
     }
 
     public void recycle() {
+        state.initialState.firstFrame.recycle();
         isRecycled = true;
         state.frameLoader.clear();
     }
@@ -367,12 +394,14 @@ public class WebpDrawable extends Drawable implements WebpFrameLoader.FrameCallb
     }
 
     static class WebpState extends ConstantState {
+        final InitialState initialState;
         final BitmapPool bitmapPool;
         final WebpFrameLoader frameLoader;
 
-        public WebpState(BitmapPool bitmapPool, WebpFrameLoader frameLoader) {
+        public WebpState(BitmapPool bitmapPool, WebpFrameLoader frameLoader, InitialState initialState) {
             this.bitmapPool = bitmapPool;
             this.frameLoader = frameLoader;
+            this.initialState = initialState;
         }
 
         public Drawable newDrawable(Resources res) {
@@ -380,7 +409,7 @@ public class WebpDrawable extends Drawable implements WebpFrameLoader.FrameCallb
         }
 
         public Drawable newDrawable() {
-            return new WebpDrawable(this);
+            return initialState.getDrawable();
         }
 
         public int getChangingConfigurations() {
@@ -391,6 +420,17 @@ public class WebpDrawable extends Drawable implements WebpFrameLoader.FrameCallb
     // FORK CHANGES
     private Transform transform;
 
+    public void newDrawable() {
+        new WebpDrawable(
+                state.initialState.context,
+                state.initialState.webDecoder,
+                state.initialState.bitmapPool,
+                state.initialState.frameTransformation,
+                state.initialState.targetFrameWidth,
+                state.initialState.targetFrameHeight,
+                state.initialState.firstFrame
+        );
+    }
     public void seekToBlocking(long timeMs) {
         final int newFrameIndex = getFrameIndexForTime(timeMs);
         seekToBlocking(newFrameIndex);
