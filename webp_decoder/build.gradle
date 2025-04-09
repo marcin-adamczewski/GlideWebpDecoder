@@ -52,12 +52,4 @@ android {
     }
 }
 
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            groupId = GROUP
-            artifactId = 'webpdecoder'
-
-        }
-    }
-}
+apply from: "${rootProject.projectDir}/release-bintray.gradle"
