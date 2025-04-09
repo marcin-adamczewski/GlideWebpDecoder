@@ -31,6 +31,12 @@ android {
         }
     }
 
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
+
     externalNativeBuild {
         ndkBuild {
             path "src/main/jni/Android.mk"
@@ -52,4 +58,15 @@ android {
     }
 }
 
-apply from: "${rootProject.projectDir}/release-bintray.gradle"
+publishing {
+    publications {
+        release(MavenPublication) {
+            groupId = GROUP
+            artifactId = 'webpdecoder'
+
+            afterEvaluate {
+                from components.release
+            }
+        }
+    }
+}
