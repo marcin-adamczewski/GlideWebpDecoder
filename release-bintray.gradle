@@ -28,6 +28,9 @@ ext {
 // Android tasks
 apply from: rootProject.file('scripts/android-tasks.gradle')
 
+// Set up the Android Maven publication (POM etc.)
+apply from: rootProject.file('scripts/android-maven-install.gradle')
+
 // Upload to Bintray
 apply from: rootProject.file('scripts/bintray.gradle')
 
